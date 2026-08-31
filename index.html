@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>无限脑图 · 3级下钻视区</title>
+  <link rel="stylesheet" href="lib/codemirror/codemirror.css" />
+  <link rel="stylesheet" href="lib/codemirror/theme/material-darker.css" />
+  <link rel="stylesheet" href="lib/codemirror/theme/mdn-like.css" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body class="dark">
+  <!-- ============ 顶部菜单栏 ============ -->
+  <header id="topbar">
+    <button class="brand" id="btn-brand" title="点击回到根节点">
+      <span class="brand-icon">🧠</span>
+      <span class="brand-text" id="app-title">无限脑图</span>
+    </button>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-menu">
+      <button class="tb-btn" id="btn-help" title="帮助 / 快捷键">？</button>
+
+      <div class="dd" id="dd-file">
+        <button class="tb-btn dd-btn">🎞️</button>
+        <div class="dd-menu" id="dd-file-menu">
+          <button class="dd-item" data-act="import">📥 导入文件 (.md / .mmd / .txt)</button>
+          <button class="dd-item" data-act="export-md">📄 导出源码 (.md)</button>
+          <button class="dd-item" data-act="export-mmd">🧩 导出 Mermaid (.mmd)</button>
+          <button class="dd-item" data-act="copy-mmd">📋 复制 Mermaid 文本</button>
+        </div>
+      </div>
+
+      <button class="tb-btn" id="btn-root" title="一键回根节点">⚛️</button>
+
+      <div class="dd" id="dd-color">
+        <button class="tb-btn dd-btn">🌈</button>
+        <div class="dd-menu dd-themes" id="dd-color-menu"></div>
+      </div>
+
+      <div class="dd" id="dd-shape">
+        <button class="tb-btn dd-btn">🔷</button>
+        <div class="dd-menu" id="dd-shape-menu"></div>
+      </div>
+
+      <button class="tb-btn" id="btn-mode" title="切换 深色 / 浅色">🌙</button>
+
+      <a class="tb-link" id="link-home" href="#" target="_blank" rel="noopener">工具主页</a>
+      <a class="tb-avatar" id="link-avatar" href="#" target="_blank" rel="noopener">
+        <span class="avatar-fallback" id="avatar-fallback">关</span>
+        <img id="avatar-img" alt="头像" hidden />
+        <span id="follow-text">关注我</span>
+      </a>
+    </div>
+  </header>
+
+  <!-- ============ 主布局：左编辑器 : 右画布 ============ -->
+  <div id="app">
+    <aside id="editor-panel">
+      <div class="editor-head">
+        <span class="editor-title">源码编辑器</span>
+        <span class="editor-hint">缩进 = 层级 · 防抖 300ms 实时解析</span>
+        <button class="collapse-btn" id="btn-collapse" title="收回编辑器 (Ctrl /)">⌄</button>
+      </div>
+      <textarea id="src-editor" spellcheck="false"></textarea>
+      <div class="editor-foot">
+        <span id="editor-stat">0 节点</span>
+        <button class="mini-btn" id="btn-export-md-foot">导出 .md</button>
+      </div>
+    </aside>
+
+    <main id="canvas-panel">
+      <button class="open-editor-btn" id="btn-open-editor" title="呼出编辑器 (Ctrl /)">^</button>
+
+      <!-- 全局搜索 -->
+      <div class="toolbar">
+        <div class="search-wrap">
+          <span class="search-ico">🔍</span>
+          <input id="search-input" type="text" placeholder="全局搜索节点，回车跳转" autocomplete="off" />
+          <div class="search-results" id="search-results"></div>
+        </div>
+      </div>
+
+      <!-- 面包屑导航 -->
+      <nav id="breadcrumbs">
+        <button class="crumb-up" id="btn-up" title="跳转上一级">←</button>
+        <div class="crumb-path" id="crumb-path"></div>
+      </nav>
+
+      <!-- 无限脑图画布 -->
+      <div class="canvas-wrap" id="canvas-wrap">
+        <div id="mermaid-container"></div>
+      </div>
+
+      <!-- 底部提示 -->
+      <footer id="hint">点击神经突触进入下一个神经元🌟　·　Ctrl / 呼出面板控制大脑🧠</footer>
+    </main>
+  </div>
+
+  <!-- ============ 全局微缩地图 ============ -->
+  <div id="minimap-box" title="全局微缩地图：亮色区域 = 当前 3 级视区">
+    <canvas id="minimap"></canvas>
+  </div>
+
+  <!-- ============ 帮助弹窗 ============ -->
+  <div id="help-modal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <b>无限脑图 · 使用说明</b>
+        <button class="modal-close" id="btn-help-close">×</button>
+      </div>
+      <div class="modal-body">
+        <table class="help-table">
+          <tr><td>Ctrl /</td><td>呼出 / 收回左侧源码编辑器</td></tr>
+          <tr><td>点击泛光节点</td><td>下钻：该分支成为新的伪根，平滑放大到中心</td></tr>
+          <tr><td>点击当前根节点</td><td>上钻：回到上一级分支</td></tr>
+          <tr><td>←（面包屑左侧）</td><td>跳转上一级</td></tr>
+          <tr><td>面包屑导航</td><td>O → … → joint5 → $ 路径直达任意祖先</td></tr>
+          <tr><td>全局搜索 + 回车</td><td>平滑过渡到目标节点（不存在会提示）</td></tr>
+          <tr><td>点击任意节点</td><td>反向定位：编辑器滚动并高亮源码对应行</td></tr>
+          <tr><td>⚛️</td><td>一键回根节点</td></tr>
+          <tr><td>🌈</td><td>切换渐变外观主题</td></tr>
+          <tr><td>🔷</td><td>切换节点形状</td></tr>
+          <tr><td>🌙 / ☀️</td><td>深色 / 浅色界面</td></tr>
+          <tr><td>🎞️</td><td>导入 / 导出 .md、.mmd</td></tr>
+          <tr><td>右下角微缩地图</td><td>亮色区域实时标出当前 3 级视区在全图中的位置</td></tr>
+        </table>
+        <p class="help-note">编辑源码（缩进 = 层级）后，右侧画布会自动更新；点击画布节点会反向高亮源码对应行。</p>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <input type="file" id="file-input" accept=".md,.mmd,.txt" hidden />
+
+  <script src="lib/mermaid/mermaid.min.js"></script>
+  <script src="lib/codemirror/codemirror.js"></script>
+  <script src="lib/codemirror/mode/xml.js"></script>
+  <script src="lib/codemirror/mode/markdown.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/parser.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
