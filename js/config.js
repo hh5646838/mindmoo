@@ -16,27 +16,51 @@ window.APP_CONFIG = {
   followText: "关注我",
   avatarUrl: "",
   defaultDark: true,
-  defaultTheme: "aurora",
+  defaultTheme: "candy",
   defaultShape: "default",
   maxDepth: 3,
   themes: [
     { id: "aurora", name: "极光霓虹", colors: [["#7f00ff", "#e100ff"], ["#00dbde", "#fc00ff"], ["#00c6ff", "#0072ff"]] },
     { id: "ocean",  name: "深海幽蓝", colors: [["#0f2027", "#2c5364"], ["#00b4db", "#0083b0"], ["#2193b0", "#6dd5ed"]] },
     { id: "flame",  name: "烈焰橙红", colors: [["#f12711", "#f5af19"], ["#eb3349", "#f45c43"], ["#ff9966", "#ff5e62"]] },
-    { id: "forest", name: "翡翠森林", colors: [["#134e5e", "#71b280"], ["#56ab2f", "#a8e063"], ["#11998e", "#38ef7d"]] },
+    { id: "forest", name: "翠绿森林", colors: [["#134e5e", "#71b280"], ["#56ab2f", "#a8e063"], ["#11998e", "#38ef7d"]] },
+    { id: "peach",  name: "胭脂蜜桃", colors: [["#b03a68", "#e87598"], ["#d1643f", "#f2a67e"], ["#c98a3f", "#f3c98a"]] },
+    { id: "taro",   name: "香芋奶紫", colors: [["#5f4b96", "#9c85d0"], ["#7d63b8", "#bda8e6"], ["#a06aae", "#d9aed6"]] },
     { id: "candy",  name: "马卡龙甜", colors: [["#f77062", "#fe5196"], ["#c471f5", "#fa71cd"], ["#43e97b", "#38f9d7"]] },
-    { id: "cyber",  name: "赛博脉冲", colors: [["#00f5a0", "#00d9f5"], ["#f83600", "#f9d423"], ["#9d4edd", "#3c096c"]] },
-    { id: "purple", name: "暗夜紫钻", colors: [["#41295a", "#2f0743"], ["#8e2de2", "#4a00e0"], ["#c31432", "#240b36"]] },
-    { id: "mono",   name: "银灰极简", colors: [["#3a3d40", "#8e8e93"], ["#4b5563", "#9ca3af"], ["#6b7280", "#d1d5db"]] }
+    { id: "cyber",  name: "赛博脉冲", colors: [["#020617", "#00e5ff"], ["#1a0518", "#ff00a0"], ["#0a1a05", "#ccff00"]] },
+    { id: "purple", name: "暗夜紫钻", colors: [["#1e1b4b", "#4f46e5"], ["#4a1d96", "#a855f7"], ["#701a75", "#e879f9"]] },
+    /* byBranch：整条分支共用一个纯色，块内不做渐变（分支数多于配色数时循环取用）。
+     * colors[0] 是根节点，之后依次是第 1、2、3… 条分支。
+     * 灰阶按 CIELAB L* 拉开（约 5→13→22→33→44→55），相邻分支有明显可分辨的灰度差，
+     * 避免在深色背景下糊成同一个灰。
+     * 文字强制白色，最浅一档 ~#7d8793（contrast ≈4:1）可读。 */
+    { id: "mono",   name: "银灰极简", byBranch: true, colors: [
+      ["#0b0d10", "#0b0d10"],
+      ["#1c2128", "#1c2128"],
+      ["#30373f", "#30373f"],
+      ["#4a5561", "#4a5561"],
+      ["#626c78", "#626c78"],
+      ["#7d8793", "#7d8793"],
+      ["#3d4651", "#3d4651"]
+    ]}
   ],
+  /* 节点形状。
+   *   open / close：喂给 Mermaid 的语法标记，决定 Mermaid 的布局占位。
+   *   geom        ：供 app.js 后处理重绘真实几何。Mermaid 原生形状普遍偏大偏圆
+   *                 （如圆形直径取文字对角线 + padding，高度是矩形的 2.4 倍，
+   *                 实测同级节点间距会出现负值＝真正重叠），因此需要按文字尺寸
+   *                 重绘为更克制、横向更舒展的形状。
+   *   注意：id 保持稳定，localStorage 里的形状偏好是按 id 记的，改名会丢失偏好。 */
   shapes: [
-    { id: "default", name: "默认（圆角矩形）", open: "", close: "" },
-    { id: "rounded", name: "圆角 ( )", open: "(", close: ")" },
-    { id: "circle",  name: "圆形 (( ))", open: "((", close: "))" },
-    { id: "square",  name: "方形 [ ]", open: "[", close: "]" },
-    { id: "hexagon", name: "六边形 {{ }}", open: "{{", close: "}}" },
-    { id: "cloud",   name: "云朵 ) (", open: ")", close: "(" },
-    { id: "bang",    name: "爆炸 )) ((", open: "))", close: "((" }
+    { id: "default",  name: "默认（细长矩形）", open: "", close: "", geom: { kind: "rect", padX: 13, padY: 6, radius: 4 } },
+    { id: "rounded",  name: "圆角 ( )", open: "(", close: ")", geom: { kind: "rect", padX: 15, padY: 9, radius: 10 } },
+    { id: "circle",   name: "圆形 (( ))", open: "((", close: "))", geom: { kind: "ellipse", padRX: 11, padRY: 12, flat: 0.6 } },
+    { id: "square",   name: "矩形 [ ]", open: "[", close: "]", geom: { kind: "rect", padX: 16, padY: 8, radius: 0 } },
+    { id: "hexagon",  name: "六边形 {{ }}", open: "{{", close: "}}", geom: { kind: "hexagon", padX: 17, padY: 9, cut: 13 } },
+    { id: "triangle", name: "三角形 △", open: "{{", close: "}}", geom: { kind: "triangle" } },
+    { id: "cloud",    name: "云朵 ) (", open: ")", close: "(", geom: { kind: "cloud", padY: 15 } },
+    /* 爆炸形保留 Mermaid 原生 path（形状本身就是装饰性的，重绘收益不大） */
+    { id: "bang",     name: "爆炸 )) ((", open: "))", close: "((", geom: null }
   ]
 };
 

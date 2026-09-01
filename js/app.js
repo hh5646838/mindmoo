@@ -49,6 +49,9 @@
     "      子联合1",
     "        更深",
     "      子联合2",
+    "    信号传递",
+    "      电信号",
+    "      化学递质",
     "  外观设计",
     "    渐变主题",
     "      极光霓虹",
@@ -60,6 +63,9 @@
     "      六边形",
     "      云朵",
     "      爆炸",
+    "    深色模式",
+    "      自动切换",
+    "      手动切换",
     "  配置",
     "    主页链接",
     "    头像关注",
@@ -80,8 +86,15 @@
     clearTimeout(toast._t);
     toast._t = setTimeout(() => (el.hidden = true), 2200);
   }
-  function savePrefs() {
-    try { localStorage.setItem(LS_PREFS, JSON.stringify({ theme: state.theme, shape: state.shape, dark: state.dark })); } catch (e) {}
+  /* 偏好持久化：theme / shape 只有被用户主动点选过（pinned）才覆盖 config 默认值，
+   * 这样之后改 config.js / config.json 里的 defaultTheme、defaultShape
+   * 能立即对「没手动选过」的浏览器生效，而不被历史偏好悄悄盖掉。 */
+  function savePrefs(patch) {
+    try {
+      const cur = JSON.parse(localStorage.getItem(LS_PREFS) || "{}");
+      Object.assign(cur, { theme: state.theme, shape: state.shape, dark: state.dark }, patch || {});
+      localStorage.setItem(LS_PREFS, JSON.stringify(cur));
+    } catch (e) {}
   }
 
   /* ---------------- 自定义 CodeMirror 模式：缩进树 ---------------- */
@@ -189,6 +202,12 @@
     });
   }
 
+  /* View Transition 下钻过渡。需求侧需要「点击节点放大成新根」的连贯动画，
+   * 默认开启；少数环境（如系统开了「减少动态效果」、headless 截图工具）下
+   * `document.startViewTransition` 可能不起作用或产生卡顿，那时把 USE_VT
+   * 改 false 即可退化为无动画的直接重绘。 */
+  const USE_VT = true;
+
   /* ---------------- 渲染主控（带 View Transitions） ---------------- */
   async function renderMindmap(focusId, animate) {
     state.focusId = focusId;
@@ -199,7 +218,7 @@
     // 「t.finished 永不 resolve」的环境（如系统减少动态效果、headless 虚拟时间）下面包屑不更新。
     const afterRender = () => { updateBreadcrumbs(); updateMinimap(); updateEditorStat(); };
 
-    if (document.startViewTransition && animate !== false && srcGid) {
+    if (USE_VT && document.startViewTransition && animate !== false && srcGid) {
       if (srcEl) { try { srcEl.style.viewTransitionName = "vt-target"; } catch (e) {} }
       const t = document.startViewTransition(async () => {
         await doRender();
@@ -243,14 +262,24 @@
     }
   }
 
-  /* ---------------- SVG 后处理：渐变 / 发光 / 点击 ---------------- */
+  /* ---------------- SVG 后处理：渐变 / 发光 / 点击 ----------------
+   * 两种上色模式（由主题的 byBranch 决定）：
+   *   · byBranch=false（默认）：colors 的 3 组渐变按「相对层级」上色，
+   *     同一层所有节点同色，块内由 pair[0]→pair[1] 做纵向渐变。
+   *   · byBranch=true        ：colors 的每一组是「一个分支」的纯色（pair 两端相同），
+   *     整条分支共用一个灰度/色阶，块内没有渐变。Mermaid 会给每个节点打上
+   *     section-N 类（根为 section--1），直接拿它当分支号即可。
+   *     分支数多于配色数时循环取用。 */
+  const BRANCH_MAX = 8;
+
   function injectGradients(svg) {
     const NS = "http://www.w3.org/2000/svg";
     let defs = svg.querySelector("defs");
     if (!defs) { defs = document.createElementNS(NS, "defs"); svg.prepend(defs); }
     const theme = getTheme(state.theme);
-    (theme && theme.colors ? theme.colors : []).slice(0, 3).forEach((pair, i) => {
-      const id = "mmgrad-" + i;
+    const cols = (theme && theme.colors) || [];
+
+    const put = (id, c1, c2) => {
       let g = defs.querySelector("#" + id);
       if (!g) {
         g = document.createElementNS(NS, "linearGradient");
@@ -261,17 +290,244 @@
       }
       g.innerHTML = "";
       const s1 = document.createElementNS(NS, "stop");
-      s1.setAttribute("offset", "0%"); s1.setAttribute("stop-color", pair[0]);
+      s1.setAttribute("offset", "0%"); s1.setAttribute("stop-color", c1);
       const s2 = document.createElementNS(NS, "stop");
-      s2.setAttribute("offset", "100%"); s2.setAttribute("stop-color", pair[1]);
+      s2.setAttribute("offset", "100%"); s2.setAttribute("stop-color", c2);
       g.appendChild(s1); g.appendChild(s2);
-    });
+    };
+
+    if (theme && theme.byBranch) {
+      cols.slice(0, BRANCH_MAX).forEach((pair, bi) => {
+        /* 纯色：两端取同一个值，渐变退化成平涂 */
+        put("mmgrad-b" + bi, pair[0], pair[1] || pair[0]);
+      });
+    } else {
+      cols.slice(0, 3).forEach((pair, i) => put("mmgrad-" + i, pair[0], pair[1] || pair[0]));
+    }
   }
 
-  function applyGradient(nodeEl, depthRel) {
-    const fillEl = nodeEl.querySelector("rect, circle, path, ellipse");
+  /* 从 Mermaid 打的 section-N 类里取分支号；根节点是 section--1 */
+  function branchIndexOf(g) {
+    const m = /section-(-?\d+)/.exec(g.getAttribute("class") || "");
+    if (!m) return 0;
+    const n = parseInt(m[1], 10);
+    return n < 0 ? 0 : n + 1;
+  }
+
+  function hexToRgb(h) {
+    h = String(h).replace("#", "");
+    if (h.length === 3) h = h.split("").map((c) => c + c).join("");
+    const n = parseInt(h, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function mixHex(c1, c2, w1) {
+    const a = hexToRgb(c1), b = hexToRgb(c2);
+    return "rgb(" + a.map((v, i) => Math.round(v * w1 + b[i] * (1 - w1))).join(",") + ")";
+  }
+  /* 将暗色提亮为可见的发光色；已够亮的颜色只做轻微提亮，避免发灰。 */
+  function brighten(c, amount) {
+    const [r, g, b] = hexToRgb(c);
+    amount = Math.max(0, Math.min(1, amount));
+    return "rgb(" + Math.round(r + (255 - r) * amount) + "," + Math.round(g + (255 - g) * amount) + "," + Math.round(b + (255 - b) * amount) + ")";
+  }
+
+  /* ---------------- 节点形状重绘 ----------------
+   * Mermaid 原生形状普遍偏大、偏圆，直接用在 3 级视区里会互相挤压：
+   *   · 圆形直径取「文字对角线 + padding」，高度是矩形的 2.4 倍，
+   *     实测同级节点垂直间距为 -4.8px（即真正重叠）；
+   *   · 矩形 / 六边形高度为文字高的 2.7 倍，显得又高又笨；
+   *   · 云朵高达 86px，占掉两行节点的位置。
+   * 这里统一按文字实际尺寸重绘几何：
+   *   · 矩形类：横向留白 > 纵向留白，得到横向细长的观感，圆角收敛为微导圆角；
+   *   · 圆形：改为横向椭圆（rx 跟随文字宽，ry 跟随文字高并收敛），大幅降低垂直占位；
+   *   · 云朵：保留 Mermaid 的有机轮廓，仅按目标高度做垂直压缩；
+   *   · 等边三角形：Mermaid mindmap 无此语法，用六边形 {{ }} 语法占位后重绘。
+   * 只改几何、不动布局：连线端点本就深入节点内部十几像素并被节点盖住，
+   * 形状缩小后依然被覆盖，因此无需同步调整连线。 */
+  const GEOM_ATTRS = new Set(["d", "x", "y", "width", "height", "rx", "ry", "cx", "cy", "r", "points", "transform"]);
+  const SVG_NS = "http://www.w3.org/2000/svg";
+
+  /* 元素中心在 g.mindmap-node 局部坐标系中的位置（自动跨越中间各层 transform） */
+  function centerIn(el, gEl) {
+    const b = el.getBBox();
+    const mg = gEl.getCTM(), me = el.getCTM();
+    if (!mg || !me) return null;
+    const p = new DOMPoint(b.x + b.width / 2, b.y + b.height / 2).matrixTransform(mg.inverse().multiply(me));
+    return { x: p.x, y: p.y };
+  }
+
+  /* 承载文字的那个带 transform 的 <g>（Mermaid 用它把文字摆到形状中心） */
+  function textGroupOf(textEl, g) {
+    let el = textEl.parentElement, fallback = null;
+    while (el && el !== g) {
+      if (el.getAttribute("transform")) return el;
+      if (!fallback) fallback = el;
+      el = el.parentElement;
+    }
+    return fallback || textEl.parentElement;
+  }
+
+  function cloneShapeEl(src, tag) {
+    const el = document.createElementNS(SVG_NS, tag);
+    Array.from(src.attributes).forEach((a) => {
+      if (GEOM_ATTRS.has(a.name)) return;
+      el.setAttribute(a.name, a.value);
+    });
+    return el;
+  }
+
+  function pointsStr(pts) {
+    return pts.map((p) => p[0].toFixed(2) + "," + p[1].toFixed(2)).join(" ");
+  }
+
+  /* 返回 {el, box, textOffsetY}；box 为新形状在 g 局部坐标系下的包围盒 */
+  function buildShape(geom, shapeEl, c, tw, th) {
+    if (geom.kind === "rect") {
+      const w = tw + geom.padX * 2, h = th + geom.padY * 2;
+      const el = cloneShapeEl(shapeEl, "rect");
+      el.setAttribute("x", (c.x - w / 2).toFixed(2));
+      el.setAttribute("y", (c.y - h / 2).toFixed(2));
+      el.setAttribute("width", w.toFixed(2));
+      el.setAttribute("height", h.toFixed(2));
+      if (geom.radius) { el.setAttribute("rx", geom.radius); el.setAttribute("ry", geom.radius); }
+      return { el: el, box: { x: c.x - w / 2, y: c.y - h / 2, w: w, h: h }, textOffsetY: 0 };
+    }
+    if (geom.kind === "circle") {
+      /* 正圆：半径 = max(文字半宽, 文字半高) + 小 padding，让圆贴近文字、
+       * 整体大小约为之前的 7/10。文字四角到圆心的距离 ≤ 半对角线，
+       * 加上 padR 后确保文字不会探出圆外。 */
+      const r = Math.max(tw, th) / 2 + geom.padR;
+      const el = cloneShapeEl(shapeEl, "circle");
+      el.setAttribute("cx", c.x.toFixed(2));
+      el.setAttribute("cy", c.y.toFixed(2));
+      el.setAttribute("r", r.toFixed(2));
+      return { el: el, box: { x: c.x - r, y: c.y - r, w: r * 2, h: r * 2 }, textOffsetY: 0 };
+    }
+    if (geom.kind === "ellipse") {
+      const rx = tw / 2 + geom.padRX;
+      const ry = Math.max(th / 2 + geom.padRY, rx * (geom.flat || 0.6));
+      const el = cloneShapeEl(shapeEl, "ellipse");
+      el.setAttribute("cx", c.x.toFixed(2));
+      el.setAttribute("cy", c.y.toFixed(2));
+      el.setAttribute("rx", rx.toFixed(2));
+      el.setAttribute("ry", ry.toFixed(2));
+      return { el: el, box: { x: c.x - rx, y: c.y - ry, w: rx * 2, h: ry * 2 }, textOffsetY: 0 };
+    }
+    if (geom.kind === "hexagon") {
+      const w = tw + geom.padX * 2, h = th + geom.padY * 2;
+      const cut = Math.min(geom.cut || 13, w * 0.18);
+      const el = cloneShapeEl(shapeEl, "polygon");
+      el.setAttribute("points", pointsStr([
+        [c.x - w / 2 + cut, c.y - h / 2],
+        [c.x + w / 2 - cut, c.y - h / 2],
+        [c.x + w / 2, c.y],
+        [c.x + w / 2 - cut, c.y + h / 2],
+        [c.x - w / 2 + cut, c.y + h / 2],
+        [c.x - w / 2, c.y]
+      ]));
+      return { el: el, box: { x: c.x - w / 2, y: c.y - h / 2, w: w, h: h }, textOffsetY: 0 };
+    }
+    if (geom.kind === "triangle") {
+      /* 等边三角形高 H = a·√3/2。三角形装横向文字很浪费垂直空间，
+       * 因此高度设上限（实测布局可用中心距约 107px，多行文字按比例放宽），
+       * 文字允许轻微探出斜边，视觉上像贴在三角徽章上的标签。 */
+      const lines = Math.max(1, Math.round(th / 19));
+      const maxH = 60 + lines * 36;
+      const H = Math.max(th + 30, Math.min(tw * 1.35 + 22, maxH));
+      const a = H / (Math.sqrt(3) / 2);
+      const el = cloneShapeEl(shapeEl, "polygon");
+      el.setAttribute("points", pointsStr([
+        [c.x, c.y - H / 2],
+        [c.x + a / 2, c.y + H / 2],
+        [c.x - a / 2, c.y + H / 2]
+      ]));
+      /* 等边三角形的视觉重心在距底边 H/3 处，比几何中心偏低 */
+      return { el: el, box: { x: c.x - a / 2, y: c.y - H / 2, w: a, h: H }, textOffsetY: H * 0.18 };
+    }
+    return null;
+  }
+
+  function reshapeNode(g, geom) {
+    const shapeEl = g.querySelector("rect, circle, path, ellipse, polygon");
+    const textEl = g.querySelector("text");
+    if (!shapeEl || !textEl) return;
+    const c = centerIn(shapeEl, g);
+    const tc = centerIn(textEl, g);
+    if (!c || !tc) return;
+    const tb = textEl.getBBox();
+    const tw = tb.width, th = tb.height;
+    if (!tw || !th) return;
+
+    let box, textOffsetY = 0;
+
+    if (geom.kind === "cloud") {
+      /* 云朵保留 Mermaid 的有机轮廓，只按目标高度做垂直压缩（以自身中心为锚点，
+       * 中心不变，因此文字无需重新居中）。 */
+      const b = shapeEl.getBBox();
+      const targetH = th + geom.padY * 2;
+      const k = Math.min(1, targetH / b.height);
+      const bx = b.x + b.width / 2, by = b.y + b.height / 2;
+      shapeEl.setAttribute("transform",
+        "translate(" + bx.toFixed(2) + "," + by.toFixed(2) + ") scale(1," + k.toFixed(3) + ") translate(" + (-bx).toFixed(2) + "," + (-by).toFixed(2) + ")");
+      box = { x: bx - b.width / 2, y: by - (b.height * k) / 2, w: b.width, h: b.height * k };
+    } else {
+      /* Mermaid mindmap 把 shape 套在 <g transform="translate(tx,ty)"> 里再挂回 g.mindmap-node，
+       * 所以 cx/cy/x/y/points 是"元素自身局部坐标"（wrapper-local），而 centerIn 返回的是
+       * g.mindmap-node-local。直接用 c 设 cx/cy 会让新形状被多平移一次，表现为严重错位。
+       * 这里用 CTM 反推，把 c 换算到 shapeEl 父节点的局部坐标再交给 buildShape。 */
+      const cEl = toElementLocal(c, shapeEl, g);
+      const built = buildShape(geom, shapeEl, cEl, tw, th);
+      if (!built) return;
+      box = built.box;
+      textOffsetY = built.textOffsetY;
+      shapeEl.parentNode.replaceChild(built.el, shapeEl);
+    }
+
+    /* 文字重新居中到新形状（三角形需按重心下移） */
+    const dx = c.x - tc.x, dy = c.y + textOffsetY - tc.y;
+    if (Math.abs(dx) > 0.4 || Math.abs(dy) > 0.4) {
+      const tg = textGroupOf(textEl, g);
+      if (tg) {
+        const prev = tg.getAttribute("transform") || "";
+        tg.setAttribute("transform", (prev ? prev + " " : "") + "translate(" + dx.toFixed(2) + "," + dy.toFixed(2) + ")");
+      }
+    }
+
+  }
+
+  /* 把 g.mindmap-node-local 下的点 c 换算到 shapeEl 父节点的局部坐标
+   * （也就是 cx/cy/x/y/points 真正所在的坐标空间）。形状元素被包在多层 translate 的
+   * wrapper-g 里，必须用 CTM 反推，不能简单相减。
+   * 注意：要用 shapeEl.parentElement 的 CTM，而不是 shapeEl 本身的 CTM。
+   * 因为新形状会替换 shapeEl 并挂到同一父节点下，若 shapeEl 自身带 transform 属性
+   *（如 Mermaid 给 circle 写的 translate），用 me 反推会回到 shapeEl-local，
+   * 而新元素的 cx/cy 实际在 parent-local，导致严重错位。 */
+  function toElementLocal(c, shapeEl, g) {
+    const parent = shapeEl.parentElement;
+    const mp = parent && parent.getCTM();
+    const mg = g.getCTM();
+    if (!mp || !mg) return c;
+    /* mp: parent-local → user；mg: g-local → user。
+     * 反推到 parent-local: c_parent = mp⁻¹ · mg · c_g。 */
+    const m = mp.inverse().multiply(mg);
+    const p = new DOMPoint(c.x, c.y).matrixTransform(m);
+    return { x: p.x, y: p.y };
+  }
+
+  function applyGradient(nodeEl, depthRel, branchIdx) {
+    const fillEl = nodeEl.querySelector("rect, circle, path, ellipse, polygon");
     if (!fillEl) return;
-    fillEl.setAttribute("fill", "url(#mmgrad-" + Math.min(depthRel, 2) + ")");
+    const theme = getTheme(state.theme);
+    if (theme && theme.byBranch) {
+      const n = Math.max(1, (theme.colors || []).length);
+      fillEl.style.setProperty("fill", "url(#mmgrad-b" + (branchIdx % n) + ")", "important");
+      return;
+    }
+    /* Mermaid 10 mindmap 会在 SVG <style> 里注入 .section-* path { fill: hsl(...,0%) }
+     * 等规则，优先级高于 fill 属性，导致我们注入的 url(#mmgrad-N) 属性被覆盖，
+     * 节点显示为黑色/灰色，无法呈现主题渐变。
+     * 改用内联 style 并加 !important，确保渐变始终生效。 */
+    fillEl.style.setProperty("fill", "url(#mmgrad-" + Math.min(depthRel, 2) + ")", "important");
   }
 
   function postProcessSVG(sub) {
@@ -280,19 +536,42 @@
     if (!svg) return;
     injectGradients(svg);
 
-    /* 修复 Mermaid mindmap 连线：其生成的 section-edge 颜色为 hsl(...,0%)
-     *（纯黑）深色下不可见，且 edge-depth-* 宽度规则未生效（实际只有 2px 太细）。
-     * 这里强制注入固定蓝灰颜色 + 按层级的内联线宽（内联属性优先级最高）。 */
-    const EDGE_COLOR = "#9aa7bd";
+    /* 连线：Mermaid 注入的 .edge-depth-* 线宽为 14/11/8px（相邻级差仅 ~21%），
+     * 3 级视区里只有两档线，肉眼几乎看不出粗细变化（原生 Mermaid 的锥形感
+     * 来自 5、6 级深树的 17→14→11→8→5→2）。
+     * 这里按「父节点层级」（edge-depth 类即父级）显式设置更强的锥形线宽，
+     * 用内联 style + !important，不受 Mermaid 内部 CSS 与外部样式影响：
+     * root→一级 14px、一级→二级 8px、二级→三级 4.5px。
+     * 颜色取当前主题对应层级渐变的亮端，与固定中性蓝灰 6:4 混合：
+     * 既呼应节点主题色，又保证深浅两种模式下都清晰可读。 */
+    const EDGE_NEUTRAL = "#9aa7bd";
+    const EDGE_WIDTH = [14, 8, 4.5];
+    const cols = (getTheme(state.theme) || {}).colors || [];
     svg.querySelectorAll(".mindmap-edges .edge").forEach((e) => {
-      e.setAttribute("stroke", EDGE_COLOR);
-      e.setAttribute("fill", "none");
       const dm = /edge-depth-(-?\d+)/.exec(e.getAttribute("class") || "");
-      const d = dm ? parseInt(dm[1], 10) : 0;
-      e.setAttribute("stroke-width", String(d <= 0 ? 4 : d === 1 ? 3 : 2.5));
+      const d = dm ? Math.max(0, parseInt(dm[1], 10)) : 0;
+      const base = cols[d] && cols[d][1];
+      e.style.setProperty("stroke", base ? mixHex(base, EDGE_NEUTRAL, 0.6) : EDGE_NEUTRAL, "important");
+      e.style.setProperty("fill", "none", "important");
+      e.style.setProperty("stroke-width", String(EDGE_WIDTH[Math.min(d, 2)]), "important");
+      /* 粗线下折点会有尖角凸起，用圆角连接+圆头线帽过渡更顺滑；
+       * 线帽超出节点边界的部分会被后绘制的节点图形盖住，不会外溢。 */
+      e.style.setProperty("stroke-linejoin", "round");
+      e.style.setProperty("stroke-linecap", "round");
     });
 
+    const shape = getShape(state.shape);
+    const geom = shape ? shape.geom : null;
+    /* 所有根节点固定为正圆形（与当前用户所选形状无关）。
+     * 使用独立的 ROOT_CIRCLE_GEOM，而不是用户「圆形」形状的扁椭圆 geom。 */
+    const ROOT_CIRCLE_GEOM = { kind: "circle", padR: 2 };
     const labelMap = new Map(state.renderLabelMap.map((x) => [x.label, x.node]));
+    /* 呼吸光色：按节点实际填充色（层级渐变亮端 / byBranch 分支色）计算，
+     * 并对暗色做提亮，保证在深色背景下始终可见。CSS 用 var(--glow) 引用。
+     * 这样不同主题、不同分支、不同层级的发光颜色都会跟着变化，不会 stuck 在蓝色。 */
+    const theme = getTheme(state.theme);
+    // cols 已在上方连线处理处定义，复用同一份主题配色。
+
     svg.querySelectorAll("g.mindmap-node").forEach((g) => {
       const txtEl = g.querySelector("text");
       const txt = txtEl ? (txtEl.textContent || "").trim() : "";
@@ -302,8 +581,25 @@
       g.dataset.relDepth = node.depthRel;
       g.dataset.hasMore = node.hasMore ? "1" : "0";
       g.classList.add("mind-node");
-      if (node.hasMore) g.classList.add("has-more-glowing");
-      applyGradient(g, node.depthRel);
+      const bi = branchIndexOf(g);
+      if (node.hasMore) {
+        let base;
+        if (theme && theme.byBranch) {
+          base = (cols[bi % cols.length] || [])[0] || "#00e5ff";
+        } else {
+          const pair = cols[Math.min(node.depthRel, 2)];
+          base = pair ? (pair[1] || pair[0]) : "#00e5ff";
+        }
+        g.style.setProperty("--glow", brighten(base, 0.55));
+        g.classList.add("has-more-glowing");
+      }
+      /* Mermaid 给每个节点画的底部装饰粗线（原设计里充当"卡片下沿"）。
+       * 新形状走的是克制的纯色块路线，这条线会变成突兀的白色横条，直接移除。 */
+      const deco = g.querySelector("line");
+      if (deco) deco.remove();
+      const nodeGeom = node.depthRel === 0 ? ROOT_CIRCLE_GEOM : geom;
+      if (nodeGeom) reshapeNode(g, nodeGeom);
+      applyGradient(g, node.depthRel, bi);
     });
   }
 
@@ -546,6 +842,7 @@
 
   /* ---------------- 主题 / 形状 ---------------- */
   function getTheme(id) { return (window.APP_CONFIG.themes || []).find((t) => t.id === id) || window.APP_CONFIG.themes[0]; }
+  function getShape(id) { return (window.APP_CONFIG.shapes || []).find((s) => s.id === id) || window.APP_CONFIG.shapes[0]; }
 
   function buildThemeMenu() {
     const box = $("#dd-color-menu");
@@ -569,7 +866,7 @@
   }
   function setTheme(id) {
     state.theme = id;
-    savePrefs();
+    savePrefs({ themePinned: true });
     buildThemeMenu();
     renderMindmap(state.focusId, false);
   }
@@ -581,7 +878,8 @@
       const item = document.createElement("button");
       item.className = "dd-item";
       const dot = document.createElement("span");
-      dot.className = "shape-dot" + (s.id === "circle" ? " circle" : s.id === "hexagon" ? " hexagon" : s.id === "cloud" ? " cloud" : "");
+      const dotCls = { circle: "circle", hexagon: "hexagon", cloud: "cloud" }[s.id] || "";
+      dot.className = "shape-dot" + (dotCls ? " " + dotCls : "");
       const name = document.createElement("span");
       name.textContent = s.name;
       const check = document.createElement("span");
@@ -594,7 +892,7 @@
   }
   function setShape(id) {
     state.shape = id;
-    savePrefs();
+    savePrefs({ shapePinned: true });
     buildShapeMenu();
     renderMindmap(state.focusId, false);
   }
@@ -631,6 +929,7 @@
       if (a === "import") $("#file-input").click();
       else if (a === "export-md") exportMd();
       else if (a === "export-mmd") exportMmd();
+      else if (a === "export-png") exportPng();
       else if (a === "copy-mmd") copyMmd();
       $$(".dd.open").forEach((x) => x.classList.remove("open"));
     });
@@ -655,6 +954,56 @@
     const mmd = TreeParser.convertToMermaid(state.tree, state.shape, [], window.APP_CONFIG.shapes);
     download("无限脑图.mmd", mmd, "text/plain;charset=utf-8");
     toast("已导出 .mmd（Mermaid）");
+  }
+  function exportPng() {
+    const svg = $("#mermaid-container svg");
+    if (!svg) { toast("当前没有可导出的脑图", true); return; }
+    try {
+      /* 克隆 SVG 序列化为独立图片。节点渐变/连线颜色已由后处理写成内联样式，
+       * Mermaid 内部 <style> 随克隆一起带走；页面级样式（文字白色、字体）
+       * 需要在这里手动补齐，否则导出图中文字会回退为默认黑字。 */
+      const clone = svg.cloneNode(true);
+      clone.querySelectorAll("g.mindmap-node text, .node text").forEach((t) => {
+        t.setAttribute("fill", "#ffffff");
+      });
+      clone.setAttribute("font-family", '"PingFang SC","Microsoft YaHei","Segoe UI",sans-serif');
+      const vb = (clone.getAttribute("viewBox") || "").split(/[\s,]+/).map(Number);
+      let W = (vb.length === 4 && vb[2] > 0) ? vb[2] : parseFloat(clone.getAttribute("width"));
+      let H = (vb.length === 4 && vb[3] > 0) ? vb[3] : parseFloat(clone.getAttribute("height"));
+      if (!W || !H) { W = 800; H = 600; }
+      W = Math.ceil(W); H = Math.ceil(H);
+      clone.setAttribute("width", W);
+      clone.setAttribute("height", H);
+      clone.style.maxWidth = "";
+      const xml = new XMLSerializer().serializeToString(clone);
+      const url = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml);
+      const scale = 2; /* 2 倍分辨率，保证公众号长图清晰 */
+      const img = new Image();
+      img.onload = () => {
+        const cv = document.createElement("canvas");
+        cv.width = W * scale; cv.height = H * scale;
+        const ctx = cv.getContext("2d");
+        ctx.scale(scale, scale);
+        /* 背景跟随当前深浅色模式，避免导出透明底在浅色查看器里“消失” */
+        ctx.fillStyle = getComputedStyle(document.body).backgroundColor || "#10141d";
+        ctx.fillRect(0, 0, W, H);
+        ctx.drawImage(img, 0, 0, W, H);
+        cv.toBlob((blob) => {
+          if (!blob) { toast("PNG 导出失败", true); return; }
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "无限脑图.png";
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 200);
+          toast("已导出 .png 图片（2 倍分辨率）");
+        }, "image/png");
+      };
+      img.onerror = () => toast("PNG 导出失败：SVG 序列化异常", true);
+      img.src = url;
+    } catch (e) {
+      toast("PNG 导出失败：" + ((e && e.message) || e), true);
+    }
   }
   function copyMmd() {
     const mmd = TreeParser.convertToMermaid(state.tree, state.shape, [], window.APP_CONFIG.shapes);
@@ -736,8 +1085,8 @@
     // 读取本地偏好
     try {
       const p = JSON.parse(localStorage.getItem(LS_PREFS) || "{}");
-      state.theme = p.theme || window.APP_CONFIG.defaultTheme || "aurora";
-      state.shape = p.shape || window.APP_CONFIG.defaultShape || "default";
+      state.theme = (p.themePinned && p.theme) || window.APP_CONFIG.defaultTheme || "forest";
+      state.shape = (p.shapePinned && p.shape) || window.APP_CONFIG.defaultShape || "default";
       state.dark = p.dark != null ? p.dark : (window.APP_CONFIG.defaultDark !== false);
     } catch (e) {}
 

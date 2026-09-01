@@ -130,7 +130,6 @@ a { text-decoration: none; color: inherit; }
 .shape-dot.circle { border-radius: 50%; }
 .shape-dot.hexagon { clip-path: polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0 50%); border: none; background: var(--text-dim); }
 .shape-dot.cloud { border-radius: 50% 50% 50% 0; border-color: var(--accent); }
-
 /* ============ 主布局 ============ */
 #app { display: flex; height: calc(100% - var(--topbar-h)); }
 
@@ -271,64 +270,40 @@ body:not(.editor-open) .open-editor-btn { display: block; }
 #mermaid-container .node text,
 #mermaid-container .mindmap-node text { fill: #ffffff !important; }
 
-/* 连线颜色：Mermaid mindmap 默认生成纯黑连线，深色下不可见，强制覆盖为固定蓝灰（深浅模式一致）
- * 线宽：Mermaid 的 edge-depth-* 规则未生效（实际仅 2px 偏细），用 !important 按层级显式加粗 */
-#mermaid-container .mindmap-edges .edge {
-  stroke: #9aa7bd !important;
-}
-#mermaid-container .mindmap-edges .edge.edge-depth--1,
-#mermaid-container .mindmap-edges .edge.edge-depth-0 {
-  stroke-width: 4px !important;
-}
-#mermaid-container .mindmap-edges .edge.edge-depth-1 {
-  stroke-width: 3px !important;
-}
-#mermaid-container .mindmap-edges .edge.edge-depth-2,
-#mermaid-container .mindmap-edges .edge.edge-depth-3 {
-  stroke-width: 2.5px !important;
-}
-#mermaid-container .node rect, #mermaid-container .node circle, #mermaid-container .node path, #mermaid-container .node ellipse,
-#mermaid-container .mindmap-node rect, #mermaid-container .mindmap-node circle, #mermaid-container .mindmap-node path, #mermaid-container .mindmap-node ellipse {
-  stroke: rgba(255,255,255,.35);
-}
-
-/* Mermaid mindmap 连线：默认是 hsl(…, 0%) 纯黑，暗色背景下不可见。
- * 强制为中性亮色，深浅模式外观一致（与脑图节点渐变同套配色）。 */
+/* 连线颜色：Mermaid mindmap 默认生成纯黑连线，深色下不可见，强制覆盖为固定蓝灰（深浅模式一致）。
+ * 线宽不在此处覆盖：由 js/app.js 后处理按 edge-depth-*（父节点层级）
+ * 显式注入锥形线宽 14/8/4.5px（内联 !important），此处任何线宽规则都会干扰它。 */
+#mermaid-container .mindmap-edges .edge,
 #mermaid-container g.mindmap-edges .edge,
 #mermaid-container g.mindmap-edges path.edge {
-  stroke: #93a1b8 !important;
-  stroke-width: 2 !important;
+  stroke: #9aa7bd !important;
+  fill: none !important;
+}
+/* 节点无边框线：所有形状（rect/circle/path/ellipse/polygon）默认、hover、
+ * 可下钻发光状态都去掉可见描边，只保留填充与呼吸外发光。 */
+#mermaid-container .node rect, #mermaid-container .node circle, #mermaid-container .node path, #mermaid-container .node ellipse, #mermaid-container .node polygon,
+#mermaid-container .mindmap-node rect, #mermaid-container .mindmap-node circle, #mermaid-container .mindmap-node path, #mermaid-container .mindmap-node ellipse, #mermaid-container .mindmap-node polygon {
+  stroke: none !important;
 }
 
 /* 节点交互 */
 #mermaid-container g.mindmap-node { cursor: pointer; }
-#mermaid-container g.mindmap-node:hover rect,
-#mermaid-container g.mindmap-node:hover circle,
-#mermaid-container g.mindmap-node:hover path,
-#mermaid-container g.mindmap-node:hover ellipse {
-  stroke: var(--accent) !important;
-  stroke-width: 2 !important;
-}
 
-/* ============ 第3层「仍有子节点」发光 ============ */
+/* ============ 第3层「仍有子节点」发光 ============
+ * 呼吸 = 只呼吸外发光，不改节点透明度：整块节点忽明忽暗会让文字可读性抖动，
+ * 也和纯色块的克制感冲突。文字自身被强制 opacity:1，节点层再叠透明度会双重衰减。
+ * 光晕色由 app.js 在每个节点上注入的 --glow 决定（取自当前主题 L1 亮端），
+ * 没注入时回退到经典的霓虹青 #00e5ff。 */
 @keyframes glowPulse {
-  0%, 100% { filter: drop-shadow(0 0 2px rgba(0, 229, 255, .45)); }
-  50%      { filter: drop-shadow(0 0 14px rgba(0, 229, 255, .95)); }
+  0%, 100% { filter: drop-shadow(0 0 2px var(--glow, #00e5ff)); }
+  50%      { filter: drop-shadow(0 0 14px var(--glow, #00e5ff)); }
 }
 #mermaid-container g.mindmap-node.has-more-glowing rect,
 #mermaid-container g.mindmap-node.has-more-glowing circle,
 #mermaid-container g.mindmap-node.has-more-glowing path,
-#mermaid-container g.mindmap-node.has-more-glowing ellipse {
+#mermaid-container g.mindmap-node.has-more-glowing ellipse,
+#mermaid-container g.mindmap-node.has-more-glowing polygon {
   animation: glowPulse 1.7s ease-in-out infinite;
-  stroke: #00e5ff !important;
-  stroke-width: 1.8 !important;
-}
-@keyframes ringPulse {
-  0%, 100% { opacity: .55; }
-  50% { opacity: 1; }
-}
-#mermaid-container g.mindmap-node.has-more-glowing {
-  animation: ringPulse 1.7s ease-in-out infinite;
 }
 
 /* ============ CSS View Transitions ============ */
@@ -350,10 +325,14 @@ body:not(.editor-open) .open-editor-btn { display: block; }
 /* ============ 底部提示 ============ */
 #hint {
   height: var(--hint-h); display: flex; align-items: center; justify-content: center;
+  gap: 18px;
   font-size: 13px; color: var(--text-dim); letter-spacing: .5px;
   border-top: 1px solid var(--border); background: var(--bg-soft);
-  user-select: none;
+  user-select: none; padding: 0 16px;
 }
+#hint .footer-license { font-size: 11px; opacity: .75; white-space: nowrap; }
+#hint .footer-license a { color: var(--text-dim); text-decoration: underline; }
+#hint .footer-license a:hover { color: var(--text-main); }
 
 /* ============ 全局微缩地图 ============ */
 #minimap-box {

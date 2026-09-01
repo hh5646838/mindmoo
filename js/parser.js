@@ -24,6 +24,35 @@ const TreeParser = (() => {
       .trim();
   }
 
+  /* 根据显示宽度自动换行：CJK 等宽字符按 2，ASCII 按 1，零宽字符按 0。
+   * 超过阈值时拆分为多行，用 <br/> 连接供 Mermaid 渲染成多行文本。 */
+  function charDisplayWidth(ch) {
+    const cp = ch.codePointAt(0);
+    if (cp === 0x200B || cp === 0x200C || cp === 0x200D) return 0;
+    if (cp >= 0x3000 && cp <= 0x9FFF) return 2;
+    if (cp >= 0xAC00 && cp <= 0xD7AF) return 2;
+    if (cp >= 0xFF01 && cp <= 0xFF60) return 2;
+    return 1;
+  }
+  function wrapLabel(s, maxUnits) {
+    if (!s) return s;
+    const total = Array.from(s).reduce((sum, ch) => sum + charDisplayWidth(ch), 0);
+    if (total <= maxUnits) return s;
+    const parts = [];
+    let cur = "", curW = 0;
+    for (const ch of s) {
+      const w = charDisplayWidth(ch);
+      if (curW + w > maxUnits && cur) {
+        parts.push(cur);
+        cur = ch; curW = w;
+      } else {
+        cur += ch; curW += w;
+      }
+    }
+    if (cur) parts.push(cur);
+    return parts.join("<br/>");
+  }
+
   /* ---------- 1. 缩进文本 → JSON Tree ---------- */
   function parseMarkdownToTree(text) {
     const lines = String(text == null ? "" : text).split(/\r?\n/);
@@ -146,7 +175,10 @@ const TreeParser = (() => {
       while (used.has(key)) key = base + "\u200B".repeat(i++);
       used.add(key);
       if (outMap) outMap.push({ label: key, node: n });
-      const text = (shape.open || "") + key + (shape.close || "");
+      /* 按层级控制最大显示宽度，避免节点过长撑开整体布局。
+       * 根节点可稍宽，一级、二级逐层收紧。 */
+      const maxUnits = d === 0 ? 18 : d === 1 ? 14 : 12;
+      const text = (shape.open || "") + wrapLabel(key, maxUnits) + (shape.close || "");
       lines.push("  ".repeat(d + 1) + text);
       (n.children || []).forEach((c) => walk(c, d + 1));
     }
