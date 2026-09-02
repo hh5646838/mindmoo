@@ -1,11 +1,11 @@
 {
   "appTitle": "无限脑图",
-  "appSubtitle": "3 级视区 · Mermaid Mindmap",
-  "homepageUrl": "https://jojocharm.top",
+  "appSubtitle": "3 级下钻视区 · Mermaid Mindmap",
+  "homepageUrl": "https://www.doubao.com",
   "homepageText": "工具主页",
-  "followUrl": "https://jojocharm.top",
+  "followUrl": "https://www.doubao.com",
   "followText": "关注我",
-  "avatarUrl": "https://res.cloudinary.com/vljhnkvn/image/upload/w_300,f_auto,q_auto/v1787087515/logo_jojo.jpg",
+  "avatarUrl": "",
   "defaultDark": true,
   "defaultTheme": "candy",
   "defaultShape": "default",
@@ -78,9 +78,9 @@
       "id": "cyber",
       "name": "赛博脉冲",
       "colors": [
-        ["#020617", "#00e5ff"],
-        ["#1a0518", "#ff00a0"],
-        ["#0a1a05", "#ccff00"]
+        ["#050510", "#00f0ff"],
+        ["#0f0818", "#ff2d9e"],
+        ["#080a14", "#8a5cff"]
       ]
     },
     {

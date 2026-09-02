@@ -27,7 +27,7 @@ window.APP_CONFIG = {
     { id: "peach",  name: "胭脂蜜桃", colors: [["#b03a68", "#e87598"], ["#d1643f", "#f2a67e"], ["#c98a3f", "#f3c98a"]] },
     { id: "taro",   name: "香芋奶紫", colors: [["#5f4b96", "#9c85d0"], ["#7d63b8", "#bda8e6"], ["#a06aae", "#d9aed6"]] },
     { id: "candy",  name: "马卡龙甜", colors: [["#f77062", "#fe5196"], ["#c471f5", "#fa71cd"], ["#43e97b", "#38f9d7"]] },
-    { id: "cyber",  name: "赛博脉冲", colors: [["#020617", "#00e5ff"], ["#1a0518", "#ff00a0"], ["#0a1a05", "#ccff00"]] },
+    { id: "cyber",  name: "赛博脉冲", colors: [["#050510", "#00f0ff"], ["#0f0818", "#ff2d9e"], ["#080a14", "#8a5cff"]] },
     { id: "purple", name: "暗夜紫钻", colors: [["#1e1b4b", "#4f46e5"], ["#4a1d96", "#a855f7"], ["#701a75", "#e879f9"]] },
     /* byBranch：整条分支共用一个纯色，块内不做渐变（分支数多于配色数时循环取用）。
      * colors[0] 是根节点，之后依次是第 1、2、3… 条分支。
