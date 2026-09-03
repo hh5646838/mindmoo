@@ -226,12 +226,20 @@
   }
   function countNodes(n) { let c = 1; (n.children || []).forEach((x) => (c += countNodes(x))); return c; }
 
-  function openEditor() { document.body.classList.add("editor-open"); }
+  function openEditor() {
+    document.body.classList.add("editor-open");
+    // 面板从 width 0 展开后，CodeMirror 需要 refresh 才能正确渲染
+    if (editor) setTimeout(() => editor.refresh(), 50);
+  }
   function closeEditor() { document.body.classList.remove("editor-open"); }
   function toggleEditor() { document.body.classList.toggle("editor-open"); }
 
+  const isMobile = () => window.matchMedia("(max-width: 760px)").matches || ("ontouchstart" in window && window.innerWidth <= 1024);
+
   function reverseLocate(line, afterDrill) {
     const doIt = () => {
+      // 手机端点节点不再自动弹满屏编辑器；若编辑器已打开，仍滚动高亮对应行
+      if (isMobile() && !document.body.classList.contains("editor-open")) return;
       openEditor();
       if (!editor) return;
       const pos = { line: Math.max(0, (line || 1) - 1), ch: 0 };
